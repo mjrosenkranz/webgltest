@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"unsafe"
 	"syscall/js"
-	"github.com/xen0ne/webgl/glutil"
+	"unsafe"
+
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/xen0ne/webgl/glutil"
 )
 
 const vertSource = `
@@ -20,7 +21,7 @@ void main() {
 }
 `
 
-const fragSource =`
+const fragSource = `
 void main() {
   gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
 }
@@ -28,32 +29,52 @@ void main() {
 
 var gl js.Value
 
-
-var vertz = []float32{
-	-1,  1, 0,
-	 1,  1, 0,
-	-1, -1, 0,
-	 1, -1, 0,
-}
-
 type Drawable interface {
 	Draw()
 }
 
+// TODO: make shader common unless specified otherwise
+
+// Rect is a struct which can draw a rectangle to the screen
 type Rect struct {
-	verts []float32
+	Verts []float32
+	// position
+	X, Y, Z float32
 }
 
 func NewRect(x, y, w, h int) Rect {
-	
 	return Rect{
-		verts: []float32{
-				-1,  1, 0,
-				1,  1, 0,
-				-1, -1, 0,
-				1, -1, 0,
+		Verts: []float32{
+			-1, 1, 0,
+			1, 1, 0,
+			-1, -1, 0,
+			1, -1, 0,
 		},
+		X: 0.0,
+		Y: 0.0,
+		Z: 0.0,
 	}
+}
+
+func (r *Rect) Draw(shaderProgram js.Value) {
+
+	// tell the shader what it's vertex position is
+	gl.Call("bindBuffer", gl.Get("ARRAY_BUFFER"), vertexBuffer)
+	position := gl.Call("getAttribLocation", shaderProgram, "position")
+	gl.Call("vertexAttribPointer", position, 3, gl.Get("FLOAT"), false, 0, 0)
+	gl.Call("enableVertexAttribArray", position)
+
+	glModelMatrix := gl.Call("getUniformLocation", shaderProgram, "Mmatrix")
+	modelMatrix := mgl32.Ident4()
+	var modelMatrixBuffer *[16]float32
+	modelMatrixBuffer = (*[16]float32)(unsafe.Pointer(&modelMatrix))
+	typedModelMatrixBuffer := glutil.SliceToTypedArray([]float32((*modelMatrixBuffer)[:]))
+	gl.Call("uniformMatrix4fv", glModelMatrix, false, typedModelMatrixBuffer)
+	gl.Call("bufferData", gl.Get("ARRAY_BUFFER"), glutil.SliceToTypedArray(r.Verts), gl.Get("STATIC_DRAW"))
+
+	// draw some shit
+	gl.Call("drawArrays", gl.Get("TRIANGLE_STRIP"), 0, 4, glutil.SliceToTypedArray(r.Verts))
+	fmt.Print("this worked")
 }
 
 func main() {
@@ -68,11 +89,9 @@ func main() {
 		os.Exit(1)
 	}
 
-
 	// create and BIND to vertex buffer
 	vertexBuffer := gl.Call("createBuffer")
 	gl.Call("bindBuffer", gl.Get("ARRAY_BUFFER"), vertexBuffer)
-	gl.Call("bufferData", gl.Get("ARRAY_BUFFER"), glutil.SliceToTypedArray(vertz), gl.Get("STATIC_DRAW"))
 
 	// SHADERS
 	// init shaders
@@ -87,17 +106,10 @@ func main() {
 	gl.Call("attachShader", shaderProgram, vertShader)
 	gl.Call("attachShader", shaderProgram, fragShader)
 	gl.Call("linkProgram", shaderProgram)
-	
+
 	// associate shader parameters
 	PositionMatrix := gl.Call("getUniformLocation", shaderProgram, "Pmatrix")
 	ViewMatrix := gl.Call("getUniformLocation", shaderProgram, "Vmatrix")
-	ModelMatrix := gl.Call("getUniformLocation", shaderProgram, "Mmatrix")
-
-	// tell the shader what it's vertex position is
-	gl.Call("bindBuffer", gl.Get("ARRAY_BUFFER"), vertexBuffer)
-	position := gl.Call("getAttribLocation", shaderProgram, "position")
-	gl.Call("vertexAttribPointer", position, 3, gl.Get("FLOAT"), false, 0, 0)
-	gl.Call("enableVertexAttribArray", position)
 
 	// use the shader
 	gl.Call("useProgram", shaderProgram)
@@ -125,19 +137,10 @@ func main() {
 	typedViewMatrixBuffer := glutil.SliceToTypedArray([]float32((*viewMatrixBuffer)[:]))
 	gl.Call("uniformMatrix4fv", ViewMatrix, false, typedViewMatrixBuffer)
 
-	// here we would apply a model matrix
-	modelMatrix := mgl32.Ident4()
-	var modelMatrixBuffer *[16]float32
-	modelMatrixBuffer = (*[16]float32)(unsafe.Pointer(&modelMatrix))
-	typedModelMatrixBuffer := glutil.SliceToTypedArray([]float32((*modelMatrixBuffer)[:]))
-	gl.Call("uniformMatrix4fv", ModelMatrix, false, typedModelMatrixBuffer)
-
-
-	draw()
-
+	draw(shaderProgram)
 }
 
-func draw() {
+func draw(sp js.Value) {
 	// clear screen
 	gl.Call("clearColor", 0.0, 0.0, 0.0, 1.0)
 	gl.Call("clearDepth", 1.0)
@@ -147,5 +150,7 @@ func draw() {
 	gl.Call("clear", gl.Get("COLOR_BUFFER_BIT"))
 	gl.Call("clear", gl.Get("DEPTH_BUFFER_BIT"))
 	// only need the vertex buffer rn
-	gl.Call("drawArrays", gl.Get("TRIANGLE_STRIP"), 0, 4, glutil.SliceToTypedArray(vertz))
+
+	r := NewRect(0, 0, 100, 100)
+	r.Draw(sp)
 }
